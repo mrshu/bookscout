@@ -11,11 +11,11 @@ from rich.console import Console
 from rich.table import Table
 
 from bookscout.models import BookResult
-from bookscout.scrapers import BlackwellsScraper, KennysScraper, WorderyScraper
+from bookscout.scrapers import BlackwellsScraper, KennysScraper, LibristoScraper, WorderyScraper
 
 app = typer.Typer(
     name="bookscout",
-    help="Compare book prices across Blackwells, Kennys, and Wordery.",
+    help="Compare book prices across Blackwells, Kennys, Libristo, and Wordery.",
     no_args_is_help=True,
 )
 console = Console()
@@ -34,12 +34,14 @@ class Store(str, Enum):
 
     blackwells = "blackwells"
     kennys = "kennys"
+    libristo = "libristo"
     wordery = "wordery"
 
 
 SCRAPER_MAP = {
     Store.blackwells: BlackwellsScraper,
     Store.kennys: KennysScraper,
+    Store.libristo: LibristoScraper,
     Store.wordery: WorderyScraper,
 }
 

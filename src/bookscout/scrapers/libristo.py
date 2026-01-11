@@ -17,7 +17,7 @@ class LibristoScraper(BaseScraper):
     async def search(self, query: str) -> BookResult | None:
         """Search Libristo for a book."""
         encoded_query = urllib.parse.quote_plus(query)
-        search_url = f"{self.base_url}/en/search?q={encoded_query}"
+        search_url = f"{self.base_url}/en/search?t={encoded_query}"
 
         page = await self._new_page()
         try:
@@ -33,7 +33,7 @@ class LibristoScraper(BaseScraper):
                 pass
 
             # Wait for search results to load
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000)
 
             return await self._extract_first_result(page)
         finally:
@@ -45,18 +45,18 @@ class LibristoScraper(BaseScraper):
 
     async def _extract_first_result(self, page) -> BookResult | None:
         """Extract the first search result from the page."""
-        # Look for product links - Libristo uses /en/book/ or similar patterns
-        all_links = await page.query_selector_all("a[href]")
-
-        product_href = None
-        for link in all_links:
-            href = await link.get_attribute("href")
-            if href and ("/book/" in href or "/kniha/" in href or "/buch/" in href):
-                # Skip navigation/category links
-                if "/book/category" in href or "/book/search" in href:
-                    continue
-                product_href = href
-                break
+        # Use JavaScript to find product links - they follow pattern /en/book/{slug}_{id}
+        product_href = await page.evaluate('''() => {
+            const links = document.querySelectorAll('a');
+            for (const link of links) {
+                const href = link.getAttribute('href') || '';
+                // Match /en/book/ or /sk/kniha/ etc patterns with underscore+digits at end
+                if (href.match(/\\/(book|kniha|buch)\\/[^/]+_\\d+$/)) {
+                    return href;
+                }
+            }
+            return null;
+        }''')
 
         if not product_href:
             return None

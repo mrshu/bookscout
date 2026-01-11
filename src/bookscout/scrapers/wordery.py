@@ -48,20 +48,23 @@ class WorderyScraper(BaseScraper):
     async def _extract_first_result(self, page) -> BookResult | None:
         """Extract the first search result from the page."""
         # Wordery product URLs follow pattern: /book/{title}/{author}/{isbn}
-        all_links = await page.query_selector_all("a[href]")
-
-        product_href = None
-        for link in all_links:
-            href = await link.get_attribute("href")
-            if href and "/book/" in href:
-                # Check if URL ends with ISBN-like pattern
-                parts = href.rstrip("/").split("/")
-                if parts:
-                    last_part = parts[-1]
-                    # ISBN should be 10 or 13 digits
-                    if len(last_part) >= 10 and last_part.replace("X", "").replace("x", "").isdigit():
-                        product_href = href
-                        break
+        # Use JavaScript to get resolved href (not the attribute) since Wordery
+        # uses empty or anchor-only href attributes with base URL resolution
+        product_href = await page.evaluate('''() => {
+            const links = document.querySelectorAll('a');
+            for (const a of links) {
+                const href = a.href;  // resolved URL, not attribute
+                if (href && href.includes('/book/')) {
+                    // Check if URL ends with ISBN-like pattern
+                    const parts = href.replace(/#.*$/, '').split('/');
+                    const lastPart = parts[parts.length - 1];
+                    if (lastPart && lastPart.length >= 10 && /^[0-9Xx]+$/.test(lastPart)) {
+                        return href.replace(/#.*$/, '');  // Remove any hash
+                    }
+                }
+            }
+            return null;
+        }''')
 
         if not product_href:
             return None

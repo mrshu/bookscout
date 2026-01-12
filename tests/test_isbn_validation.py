@@ -2,7 +2,8 @@
 
 import pytest
 
-from bookscout.cli import find_canonical_isbn, find_canonical_isbn_from_results
+from bookscout.cli import find_canonical_isbn, find_canonical_isbn_from_results, find_canonical_isbn_weighted
+from bookscout.scrapers.base import SearchResultItem
 from bookscout.models import BookResult
 
 
@@ -127,3 +128,63 @@ class TestIsbnValidationIntegration:
         assert "wordery" in retry_stores
         assert "kennys" in retry_stores
         assert "libristo" not in retry_stores
+
+
+class TestFindCanonicalIsbnWeighted:
+    """Tests for weighted ISBN scoring with ranking and 979-8 penalty."""
+
+    def test_prefers_higher_ranked_isbn(self):
+        """ISBN at position 1 should beat ISBN at position 3 even with more occurrences."""
+        store1 = [SearchResultItem(isbn="1111111111111", url="u1", title="Book A")]
+        store2 = [SearchResultItem(isbn="1111111111111", url="u2", title="Book A")]
+        store3 = [
+            SearchResultItem(isbn="2222222222222", url="u3a", title="Book B"),
+            SearchResultItem(isbn="2222222222222", url="u3b", title="Book B"),
+            SearchResultItem(isbn="1111111111111", url="u3c", title="Book A"),
+        ]
+        # ISBN 1111 at pos 1 twice (score=2.0), ISBN 2222 at pos 1 once (score=1.0)
+        result = find_canonical_isbn_weighted([store1, store2, store3])
+        assert result == "1111111111111"
+
+    def test_penalizes_9798_isbn(self):
+        """ISBN starting with 9798 should be penalized."""
+        # 9798 ISBN at position 1 in 2 stores: raw score = 2.0, penalized = 0.6
+        # 978 ISBN at position 1 in 1 store: score = 1.0
+        store1 = [SearchResultItem(isbn="9798111111111", url="u1", title="Knockoff")]
+        store2 = [SearchResultItem(isbn="9798111111111", url="u2", title="Knockoff")]
+        store3 = [SearchResultItem(isbn="9781234567890", url="u3", title="Real Book")]
+
+        result = find_canonical_isbn_weighted([store1, store2, store3])
+        assert result == "9781234567890"  # Real book wins despite fewer occurrences
+
+    def test_9798_penalty_configurable(self):
+        """Penalty can be disabled by setting to 1.0."""
+        store1 = [SearchResultItem(isbn="9798111111111", url="u1", title="Self-pub")]
+        store2 = [SearchResultItem(isbn="9798111111111", url="u2", title="Self-pub")]
+        store3 = [SearchResultItem(isbn="9781234567890", url="u3", title="Traditional")]
+
+        # With penalty disabled, 9798 wins (higher score)
+        result = find_canonical_isbn_weighted([store1, store2, store3], self_pub_penalty=1.0)
+        assert result == "9798111111111"
+
+    def test_empty_results(self):
+        """Should return None for empty results."""
+        assert find_canonical_isbn_weighted([]) is None
+        assert find_canonical_isbn_weighted([[], []]) is None
+
+    def test_no_isbns(self):
+        """Should return None when no ISBNs in results."""
+        store1 = [SearchResultItem(isbn=None, url="u1", title="No ISBN")]
+        assert find_canonical_isbn_weighted([store1]) is None
+
+    def test_position_scoring(self):
+        """Position 1 = 1.0, position 2 = 0.5, position 3 = 0.33."""
+        # ISBN A at position 1: score = 1.0
+        # ISBN B at positions 2 and 3: score = 0.5 + 0.33 = 0.83
+        store1 = [
+            SearchResultItem(isbn="AAAAAAAAAAAAA", url="u1", title="A"),
+            SearchResultItem(isbn="BBBBBBBBBBBBB", url="u2", title="B"),
+            SearchResultItem(isbn="BBBBBBBBBBBBB", url="u3", title="B"),
+        ]
+        result = find_canonical_isbn_weighted([store1])
+        assert result == "AAAAAAAAAAAAA"

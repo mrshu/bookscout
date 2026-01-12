@@ -58,6 +58,57 @@ def find_canonical_isbn(isbns: list[str]) -> str | None:
     return None
 
 
+def find_canonical_isbn_weighted(
+    store_results: list[list],  # List of SearchResultItem lists per store
+    self_pub_penalty: float = 0.3,
+) -> str | None:
+    """Find the best ISBN using frequency + ranking weight.
+
+    ISBNs that appear earlier in search results get higher scores.
+    Score = sum of (1 / position) for each occurrence.
+
+    Example:
+    - ISBN at position 1 in 2 stores: 1/1 + 1/1 = 2.0
+    - ISBN at position 3 in 3 stores: 1/3 + 1/3 + 1/3 = 1.0
+
+    This prefers ISBNs ranked highly across multiple stores over
+    ISBNs that appear frequently but at lower positions.
+
+    Args:
+        store_results: List of SearchResultItem lists, one per store.
+        self_pub_penalty: Multiplier for 979-8 ISBNs (0.0-1.0). Default 0.3.
+            The 979-8 prefix is US-only, introduced ~2020 when 978 ran out.
+            Amazon KDP assigns free 979-8 ISBNs to self-published books
+            (imprint shows as "Independently published"). While not all
+            979-8 books are knockoffs, the mass-produced "summary" books
+            that copy popular titles are almost exclusively 979-8 via KDP.
+            Set to 1.0 to disable penalty.
+            See: https://www.isbn-international.org/content/changes-united-states-isbn-prefixes
+    """
+    isbn_scores: dict[str, float] = {}
+
+    for results in store_results:
+        seen_in_store: set[str] = set()
+        for position, item in enumerate(results, start=1):
+            if item.isbn and item.isbn not in seen_in_store:
+                seen_in_store.add(item.isbn)
+                # Score = 1/position (position 1 = 1.0, position 2 = 0.5, etc.)
+                score = 1.0 / position
+                isbn_scores[item.isbn] = isbn_scores.get(item.isbn, 0) + score
+
+    if not isbn_scores:
+        return None
+
+    # Penalize ISBNs starting with 979-8 (often self-published knockoffs)
+    if self_pub_penalty < 1.0:
+        for isbn in isbn_scores:
+            if isbn.startswith("9798"):
+                isbn_scores[isbn] *= self_pub_penalty
+
+    # Return ISBN with highest score
+    return max(isbn_scores, key=isbn_scores.get)
+
+
 def find_canonical_isbn_from_results(results: list[BookResult | None]) -> str | None:
     """Find the most common ISBN among BookResult objects (majority vote)."""
     isbns = [r.isbn for r in results if r and r.isbn]
@@ -102,8 +153,7 @@ async def run_scrapers(
                 search_tasks = [scraper.get_search_results(query) for scraper in scrapers]
                 search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-                # Collect all ISBNs from all stores' search results
-                all_isbns: list[str] = []
+                # Collect search results from all stores
                 store_search_results: list[list] = []
 
                 for result in search_results:
@@ -111,13 +161,9 @@ async def run_scrapers(
                         store_search_results.append([])
                     else:
                         store_search_results.append(result)
-                        # Add all ISBNs from this store's results
-                        for item in result:
-                            if item.isbn:
-                                all_isbns.append(item.isbn)
 
-                # Find canonical ISBN from all search results
-                canonical_isbn = find_canonical_isbn(all_isbns)
+                # Find canonical ISBN using weighted scoring (frequency + ranking)
+                canonical_isbn = find_canonical_isbn_weighted(store_search_results)
 
                 if canonical_isbn:
                     # Phase 2: For each store, find the URL with matching ISBN and fetch details

@@ -7,7 +7,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from bookscout.models import BookResult
 
-from .base import BaseScraper, title_matches_query
+from .base import BaseScraper, SearchResultItem, title_matches_query
 
 
 class KennysScraper(BaseScraper):
@@ -36,6 +36,57 @@ class KennysScraper(BaseScraper):
     async def search_isbn(self, isbn: str) -> BookResult | None:
         """Search Kennys by ISBN."""
         return await self.search(isbn)
+
+    async def get_search_results(self, query: str) -> list[SearchResultItem]:
+        """Extract ISBNs and URLs from search results without visiting product pages."""
+        page = await self._new_page()
+        try:
+            await page.goto(f"{self.base_url}/elasticsearch", wait_until="networkidle")
+            await page.evaluate(f'window.location.hash = "ges:searchword={query}"')
+            await page.wait_for_timeout(4000)
+
+            # Extract product links with ISBNs from URLs
+            # Kennys URL format: /shop/book-title-author-ISBN or /category/book-title-ISBN
+            product_data = await page.evaluate("""() => {
+                const results = [];
+                const seen = new Set();
+
+                // Look for links in search result titles
+                const resultLinks = document.querySelectorAll('.result-title a[href], .search-result a[href]');
+                for (const a of resultLinks) {
+                    const href = a.href;
+                    if (!href || !href.includes('kennys.ie')) continue;
+
+                    // Extract ISBN from URL (pattern: -XXXXXXXXXXXX at end or -XXXXXXXXXXXX-1)
+                    const isbnMatch = href.match(/-(\\d{10,13})([-]\\d)?$/);
+                    if (isbnMatch && !seen.has(isbnMatch[1])) {
+                        seen.add(isbnMatch[1]);
+                        // Extract title from URL slug
+                        const parts = href.split('/');
+                        const slug = parts[parts.length - 1];
+                        const title = slug.replace(/-\\d{10,13}(-\\d)?$/, '').replace(/-/g, ' ');
+                        results.push({
+                            isbn: isbnMatch[1],
+                            url: href,
+                            title: title
+                        });
+                        if (results.length >= 10) break;
+                    }
+                }
+                return results;
+            }""")
+
+            return [SearchResultItem(isbn=item['isbn'], url=item['url'], title=item.get('title')) for item in product_data]
+        finally:
+            await page.close()
+
+    async def get_product_details(self, url: str) -> BookResult | None:
+        """Fetch full product details from a product page URL."""
+        page = await self._new_page()
+        try:
+            return await self._extract_from_product_page(page, url)
+        finally:
+            await page.close()
 
     async def _extract_first_result(self, page, query: str) -> BookResult | None:
         """Extract the first search result that matches the query."""

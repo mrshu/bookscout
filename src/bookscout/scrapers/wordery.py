@@ -7,7 +7,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from bookscout.models import BookResult
 
-from .base import BaseScraper
+from .base import BaseScraper, SearchResultItem
 
 
 class WorderyScraper(BaseScraper):
@@ -44,6 +44,65 @@ class WorderyScraper(BaseScraper):
     async def search_isbn(self, isbn: str) -> BookResult | None:
         """Search Wordery by ISBN."""
         return await self.search(isbn)
+
+    async def get_search_results(self, query: str) -> list[SearchResultItem]:
+        """Extract ISBNs and URLs from search results without visiting product pages."""
+        encoded_query = urllib.parse.quote_plus(query)
+        search_url = f"{self.base_url}/search?term={encoded_query}"
+
+        page = await self._new_page()
+        try:
+            await page.goto(search_url, wait_until="networkidle")
+
+            # Handle cookie consent
+            try:
+                accept_btn = await page.query_selector('button:has-text("Accept All")')
+                if accept_btn:
+                    await accept_btn.click()
+                    await page.wait_for_timeout(500)
+            except Exception:
+                pass
+
+            await page.wait_for_timeout(2000)
+
+            # Extract all product links with ISBNs
+            # URL format: /book/{title}/{author}/{isbn}
+            product_data = await page.evaluate('''() => {
+                const links = document.querySelectorAll('a');
+                const results = [];
+                const seen = new Set();
+
+                for (const a of links) {
+                    const href = a.href;
+                    if (href && href.includes('/book/')) {
+                        const cleanHref = href.replace(/#.*$/, '');
+                        const parts = cleanHref.split('/');
+                        const lastPart = parts[parts.length - 1];
+                        if (lastPart && lastPart.length >= 10 && /^[0-9Xx]+$/.test(lastPart) && !seen.has(lastPart)) {
+                            seen.add(lastPart);
+                            results.push({
+                                isbn: lastPart,
+                                url: cleanHref,
+                                title: parts[parts.length - 3] || null
+                            });
+                            if (results.length >= 10) break;
+                        }
+                    }
+                }
+                return results;
+            }''')
+
+            return [SearchResultItem(isbn=item['isbn'], url=item['url'], title=item.get('title')) for item in product_data]
+        finally:
+            await page.close()
+
+    async def get_product_details(self, url: str) -> BookResult | None:
+        """Fetch full product details from a product page URL."""
+        page = await self._new_page()
+        try:
+            return await self._extract_from_product_page(page, url)
+        finally:
+            await page.close()
 
     async def _extract_first_result(self, page) -> BookResult | None:
         """Extract the first search result from the page."""

@@ -47,17 +47,21 @@ SCRAPER_MAP = {
 }
 
 
-def find_canonical_isbn(results: list[BookResult | None]) -> str | None:
-    """Find the most common ISBN among results (majority vote)."""
-    isbns = [r.isbn for r in results if r and r.isbn]
+def find_canonical_isbn(isbns: list[str]) -> str | None:
+    """Find the most common ISBN from a list (majority vote)."""
     if not isbns:
         return None
-    # Return the most common ISBN
     counter = Counter(isbns)
     most_common = counter.most_common(1)
     if most_common:
         return most_common[0][0]
     return None
+
+
+def find_canonical_isbn_from_results(results: list[BookResult | None]) -> str | None:
+    """Find the most common ISBN among BookResult objects (majority vote)."""
+    isbns = [r.isbn for r in results if r and r.isbn]
+    return find_canonical_isbn(isbns)
 
 
 async def run_scrapers(
@@ -68,8 +72,10 @@ async def run_scrapers(
 ) -> list[BookResult | None]:
     """Run scrapers in parallel and return results.
 
-    If validate_isbn is True and searching by title, will re-search stores
-    that return a different ISBN than the majority.
+    If validate_isbn is True and searching by title, uses a two-phase approach:
+    1. Extract ISBNs from search results pages (fast, no product page visits)
+    2. Find canonical ISBN via majority vote across all search results
+    3. Fetch product details only for the correct ISBN
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -78,43 +84,82 @@ async def run_scrapers(
             scrapers = [SCRAPER_MAP[store](browser) for store in stores]
 
             if isbn_mode:
+                # Direct ISBN search - no validation needed
                 tasks = [scraper.search_isbn(query) for scraper in scrapers]
-            else:
-                tasks = [scraper.search(query) for scraper in scrapers]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
+                processed: list[BookResult | None] = []
+                for r in results:
+                    if isinstance(r, Exception):
+                        processed.append(None)
+                    else:
+                        processed.append(r)
+                return processed
+
+            # Two-phase approach for title search with ISBN validation
+            if validate_isbn:
+                # Phase 1: Get search results (ISBNs) from all stores in parallel
+                search_tasks = [scraper.get_search_results(query) for scraper in scrapers]
+                search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+                # Collect all ISBNs from all stores' search results
+                all_isbns: list[str] = []
+                store_search_results: list[list] = []
+
+                for result in search_results:
+                    if isinstance(result, Exception) or not result:
+                        store_search_results.append([])
+                    else:
+                        store_search_results.append(result)
+                        # Add all ISBNs from this store's results
+                        for item in result:
+                            if item.isbn:
+                                all_isbns.append(item.isbn)
+
+                # Find canonical ISBN from all search results
+                canonical_isbn = find_canonical_isbn(all_isbns)
+
+                if canonical_isbn:
+                    # Phase 2: For each store, find the URL with matching ISBN and fetch details
+                    processed: list[BookResult | None] = []
+
+                    for i, (store, scraper) in enumerate(zip(stores, scrapers)):
+                        search_items = store_search_results[i]
+
+                        # Find the URL with matching ISBN
+                        matching_url = None
+                        for item in search_items:
+                            if item.isbn == canonical_isbn:
+                                matching_url = item.url
+                                break
+
+                        if matching_url:
+                            # Fetch product details from the matching URL
+                            try:
+                                result = await scraper.get_product_details(matching_url)
+                                processed.append(result)
+                            except Exception:
+                                processed.append(None)
+                        else:
+                            # No matching ISBN in search results, search by ISBN directly
+                            try:
+                                result = await scraper.search_isbn(canonical_isbn)
+                                processed.append(result)
+                            except Exception:
+                                processed.append(None)
+
+                    return processed
+
+            # Fallback: old approach (no two-phase, or no canonical ISBN found)
+            tasks = [scraper.search(query) for scraper in scrapers]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Convert exceptions to None
             processed: list[BookResult | None] = []
             for r in results:
                 if isinstance(r, Exception):
                     processed.append(None)
                 else:
                     processed.append(r)
-
-            # ISBN validation: re-search mismatched stores with the correct ISBN
-            if validate_isbn and not isbn_mode:
-                canonical_isbn = find_canonical_isbn(processed)
-                if canonical_isbn:
-                    # Find stores that returned a different ISBN
-                    stores_to_retry: list[tuple[int, Store]] = []
-                    for i, (store, result) in enumerate(zip(stores, processed)):
-                        if result and result.isbn and result.isbn != canonical_isbn:
-                            stores_to_retry.append((i, store))
-                        elif result is None:
-                            # Also retry stores that failed, using ISBN
-                            stores_to_retry.append((i, store))
-
-                    # Re-search with canonical ISBN
-                    if stores_to_retry:
-                        retry_scrapers = [SCRAPER_MAP[store](browser) for _, store in stores_to_retry]
-                        retry_tasks = [scraper.search_isbn(canonical_isbn) for scraper in retry_scrapers]
-                        retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
-
-                        # Update results with retried values
-                        for (idx, _), retry_result in zip(stores_to_retry, retry_results):
-                            if not isinstance(retry_result, Exception) and retry_result:
-                                processed[idx] = retry_result
 
             return processed
         finally:

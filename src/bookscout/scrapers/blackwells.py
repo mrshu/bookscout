@@ -7,7 +7,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from bookscout.models import BookResult
 
-from .base import BaseScraper, title_matches_query
+from .base import BaseScraper, SearchResultItem, title_matches_query
 
 
 class BlackwellsScraper(BaseScraper):
@@ -40,6 +40,56 @@ class BlackwellsScraper(BaseScraper):
     async def search_isbn(self, isbn: str) -> BookResult | None:
         """Search Blackwells by ISBN."""
         return await self.search(isbn)
+
+    async def get_search_results(self, query: str) -> list[SearchResultItem]:
+        """Extract ISBNs and URLs from search results without visiting product pages."""
+        encoded_query = urllib.parse.quote_plus(query)
+        search_url = f"{self.base_url}/bookshop/search?keyword={encoded_query}"
+
+        page = await self._new_page()
+        try:
+            await page.goto(search_url, wait_until="domcontentloaded")
+
+            try:
+                await page.wait_for_selector(".book-info, .product-info, .search-result", timeout=10000)
+            except PlaywrightTimeout:
+                return []
+
+            # Extract all product links with ISBNs from URLs
+            # URL format: /bookshop/product/Title-Slug/ISBN
+            links = await page.query_selector_all('a[href*="/bookshop/product/"]')
+            results = []
+            seen_isbns = set()
+
+            for link in links[:15]:
+                href = await link.get_attribute("href")
+                if not href:
+                    continue
+
+                # Extract ISBN from URL (last part)
+                parts = href.rstrip("/").split("/")
+                if parts:
+                    potential_isbn = parts[-1]
+                    # Check if it's a valid ISBN (10 or 13 digits)
+                    if len(potential_isbn) >= 10 and potential_isbn.replace("X", "").replace("x", "").isdigit():
+                        if potential_isbn not in seen_isbns:
+                            seen_isbns.add(potential_isbn)
+                            url = href if href.startswith("http") else f"{self.base_url}{href}"
+                            # Extract title from URL slug
+                            title = parts[-2].replace("-by-", " ").replace("-", " ") if len(parts) >= 2 else None
+                            results.append(SearchResultItem(isbn=potential_isbn, url=url, title=title))
+
+            return results
+        finally:
+            await page.close()
+
+    async def get_product_details(self, url: str) -> BookResult | None:
+        """Fetch full product details from a product page URL."""
+        page = await self._new_page()
+        try:
+            return await self._extract_from_product_page(page, url)
+        finally:
+            await page.close()
 
     async def _extract_first_result(self, page, query: str) -> BookResult | None:
         """Extract the first search result that matches the query."""

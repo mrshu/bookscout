@@ -2,10 +2,20 @@
 
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from playwright.async_api import Browser, Page
 
 from bookscout.models import BookResult
+
+
+@dataclass
+class SearchResultItem:
+    """A single item from search results (before fetching full details)."""
+
+    isbn: str | None
+    url: str
+    title: str | None = None
 
 
 def title_matches_query(title: str, query: str, threshold: float = 0.5) -> bool:
@@ -75,3 +85,31 @@ class BaseScraper(ABC):
             BookResult if found, None otherwise.
         """
         ...
+
+    async def get_search_results(self, query: str) -> list[SearchResultItem]:
+        """Extract ISBNs and URLs from search results page without visiting product pages.
+
+        This is faster than search() as it doesn't navigate to each product page.
+        Used for ISBN validation before fetching full details.
+
+        Args:
+            query: Book title to search for.
+
+        Returns:
+            List of SearchResultItem with ISBN, URL, and optionally title.
+        """
+        # Default implementation returns empty list
+        # Scrapers can override this for better performance
+        return []
+
+    async def get_product_details(self, url: str) -> BookResult | None:
+        """Fetch full product details from a product page URL.
+
+        Args:
+            url: URL of the product page.
+
+        Returns:
+            BookResult if successful, None otherwise.
+        """
+        # Default implementation - scrapers should override
+        return None

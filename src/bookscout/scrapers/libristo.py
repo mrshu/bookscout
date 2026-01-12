@@ -5,7 +5,7 @@ import urllib.parse
 
 from bookscout.models import BookResult
 
-from .base import BaseScraper
+from .base import BaseScraper, SearchResultItem
 
 
 class LibristoScraper(BaseScraper):
@@ -42,6 +42,69 @@ class LibristoScraper(BaseScraper):
     async def search_isbn(self, isbn: str) -> BookResult | None:
         """Search Libristo by ISBN."""
         return await self.search(isbn)
+
+    async def get_search_results(self, query: str) -> list[SearchResultItem]:
+        """Extract URLs from search results without visiting product pages.
+
+        Note: Libristo doesn't have ISBN in URLs, so we return URLs with isbn=None.
+        The ISBN will be extracted when visiting the product page.
+        """
+        encoded_query = urllib.parse.quote_plus(query)
+        search_url = f"{self.base_url}/en/search?t={encoded_query}"
+
+        page = await self._new_page()
+        try:
+            await page.goto(search_url, wait_until="networkidle")
+
+            # Handle cookie consent
+            try:
+                accept_btn = await page.query_selector('button:has-text("Accept")')
+                if accept_btn:
+                    await accept_btn.click()
+                    await page.wait_for_timeout(500)
+            except Exception:
+                pass
+
+            await page.wait_for_timeout(3000)
+
+            # Extract product links - pattern /en/book/{slug}_{id}
+            product_data = await page.evaluate('''() => {
+                const results = [];
+                const seen = new Set();
+                const links = document.querySelectorAll('a');
+
+                for (const link of links) {
+                    const href = link.getAttribute('href') || '';
+                    // Match /en/book/ or /sk/kniha/ etc patterns with underscore+digits at end
+                    if (href.match(/\\/(book|kniha|buch)\\/[^/]+_\\d+$/)) {
+                        if (!seen.has(href)) {
+                            seen.add(href);
+                            // Extract title from URL slug
+                            const parts = href.split('/');
+                            const slug = parts[parts.length - 1];
+                            const title = slug.replace(/_\\d+$/, '').replace(/-/g, ' ');
+                            results.push({
+                                url: href,
+                                title: title
+                            });
+                            if (results.length >= 10) break;
+                        }
+                    }
+                }
+                return results;
+            }''')
+
+            return [SearchResultItem(isbn=None, url=f"{self.base_url}{item['url']}" if not item['url'].startswith('http') else item['url'], title=item.get('title')) for item in product_data]
+        finally:
+            await page.close()
+
+    async def get_product_details(self, url: str) -> BookResult | None:
+        """Fetch full product details from a product page URL."""
+        page = await self._new_page()
+        try:
+            return await self._extract_from_product_page(page, url)
+        finally:
+            await page.close()
 
     async def _extract_first_result(self, page) -> BookResult | None:
         """Extract the first search result from the page."""

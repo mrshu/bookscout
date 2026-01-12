@@ -30,12 +30,17 @@ class WorderyScraper(BaseScraper):
                 accept_btn = await page.query_selector('button:has-text("Accept All")')
                 if accept_btn:
                     await accept_btn.click()
-                    await page.wait_for_timeout(500)
             except Exception:
                 pass
 
             # Wait for search results to load (Wordery uses JS to populate hrefs)
-            await page.wait_for_timeout(2000)
+            try:
+                await page.wait_for_function(
+                    "() => Array.from(document.querySelectorAll('a')).some(a => a.href && a.href.includes('/book/'))",
+                    timeout=5000
+                )
+            except Exception:
+                pass  # Continue anyway, might still have results
 
             return await self._extract_first_result(page)
         finally:
@@ -59,12 +64,17 @@ class WorderyScraper(BaseScraper):
                 accept_btn = await page.query_selector('button:has-text("Accept All")')
                 if accept_btn:
                     await accept_btn.click()
-                    await page.wait_for_timeout(500)
             except Exception:
                 pass
 
             # Wait for search results (Wordery uses JS to populate hrefs)
-            await page.wait_for_timeout(2000)
+            try:
+                await page.wait_for_function(
+                    "() => Array.from(document.querySelectorAll('a')).some(a => a.href && a.href.includes('/book/'))",
+                    timeout=5000
+                )
+            except Exception:
+                pass  # Continue anyway, might still have results
 
             # Extract all product links with ISBNs
             # URL format: /book/{title}/{author}/{isbn}
@@ -142,11 +152,10 @@ class WorderyScraper(BaseScraper):
             accept_btn = await page.query_selector('button:has-text("Accept All")')
             if accept_btn:
                 await accept_btn.click()
-                await page.wait_for_timeout(500)
         except Exception:
             pass
 
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_load_state("domcontentloaded")
 
         # Extract title from h1
         title_el = await page.query_selector("h1")

@@ -138,12 +138,11 @@ class BlackwellsScraper(BaseScraper):
             accept_btn = await page.query_selector('button:has-text("Accept All")')
             if accept_btn:
                 await accept_btn.click()
-                await page.wait_for_timeout(500)
         except Exception:
             pass
 
         # Wait for content to load
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_load_state("domcontentloaded")
 
         # Extract title
         title_el = await page.query_selector("h1")

@@ -21,7 +21,7 @@ class KennysScraper(BaseScraper):
         page = await self._new_page()
         try:
             # First navigate to the elasticsearch page
-            await page.goto(f"{self.base_url}/elasticsearch", wait_until="networkidle")
+            await page.goto(f"{self.base_url}/elasticsearch", wait_until="domcontentloaded")
 
             # Then trigger the search via hash change (this is how Kennys works)
             await page.evaluate(f'window.location.hash = "ges:searchword={query}"')
@@ -44,7 +44,7 @@ class KennysScraper(BaseScraper):
         """Extract ISBNs and URLs from search results without visiting product pages."""
         page = await self._new_page()
         try:
-            await page.goto(f"{self.base_url}/elasticsearch", wait_until="networkidle")
+            await page.goto(f"{self.base_url}/elasticsearch", wait_until="domcontentloaded")
             await page.evaluate(f'window.location.hash = "ges:searchword={query}"')
             try:
                 await page.wait_for_selector('.result-title', timeout=5000)

@@ -21,14 +21,13 @@ class LibristoScraper(BaseScraper):
 
         page = await self._new_page()
         try:
-            await page.goto(search_url, wait_until="networkidle")
+            await page.goto(search_url, wait_until="domcontentloaded")
 
             # Handle cookie consent if present
             try:
                 accept_btn = await page.query_selector('button:has-text("Accept")')
                 if accept_btn:
                     await accept_btn.click()
-                    await page.wait_for_timeout(500)
             except Exception:
                 pass
 
@@ -57,14 +56,13 @@ class LibristoScraper(BaseScraper):
 
         page = await self._new_page()
         try:
-            await page.goto(search_url, wait_until="networkidle")
+            await page.goto(search_url, wait_until="domcontentloaded")
 
             # Handle cookie consent
             try:
                 accept_btn = await page.query_selector('button:has-text("Accept")')
                 if accept_btn:
                     await accept_btn.click()
-                    await page.wait_for_timeout(500)
             except Exception:
                 pass
 
@@ -143,11 +141,10 @@ class LibristoScraper(BaseScraper):
             accept_btn = await page.query_selector('button:has-text("Accept")')
             if accept_btn:
                 await accept_btn.click()
-                await page.wait_for_timeout(500)
         except Exception:
             pass
 
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_load_state("domcontentloaded")
 
         # Extract title from h1
         title_el = await page.query_selector("h1")

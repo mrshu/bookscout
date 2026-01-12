@@ -33,7 +33,10 @@ class LibristoScraper(BaseScraper):
                 pass
 
             # Wait for search results to load
-            await page.wait_for_timeout(3000)
+            try:
+                await page.wait_for_selector('a[href*="/book/"]', timeout=5000)
+            except Exception:
+                await page.wait_for_timeout(1500)
 
             return await self._extract_first_result(page)
         finally:
@@ -65,7 +68,10 @@ class LibristoScraper(BaseScraper):
             except Exception:
                 pass
 
-            await page.wait_for_timeout(3000)
+            try:
+                await page.wait_for_selector('a[href*="/book/"]', timeout=5000)
+            except Exception:
+                await page.wait_for_timeout(1500)
 
             # Extract product links - pattern /en/book/{slug}_{id}
             product_data = await page.evaluate('''() => {

@@ -27,7 +27,10 @@ class KennysScraper(BaseScraper):
             await page.evaluate(f'window.location.hash = "ges:searchword={query}"')
 
             # Wait for results to render
-            await page.wait_for_timeout(4000)
+            try:
+                await page.wait_for_selector('.result-title', timeout=5000)
+            except Exception:
+                await page.wait_for_timeout(2000)
 
             return await self._extract_first_result(page, query)
         finally:
@@ -43,7 +46,10 @@ class KennysScraper(BaseScraper):
         try:
             await page.goto(f"{self.base_url}/elasticsearch", wait_until="networkidle")
             await page.evaluate(f'window.location.hash = "ges:searchword={query}"')
-            await page.wait_for_timeout(4000)
+            try:
+                await page.wait_for_selector('.result-title', timeout=5000)
+            except Exception:
+                await page.wait_for_timeout(2000)
 
             # Extract product links with ISBNs from URLs
             # Kennys URL format: /shop/book-title-author-ISBN or /category/book-title-ISBN

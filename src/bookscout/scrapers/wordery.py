@@ -23,7 +23,7 @@ class WorderyScraper(BaseScraper):
 
         page = await self._new_page()
         try:
-            await page.goto(search_url, wait_until="networkidle")
+            await page.goto(search_url, wait_until="domcontentloaded")
 
             # Handle cookie consent if present
             try:
@@ -34,7 +34,7 @@ class WorderyScraper(BaseScraper):
             except Exception:
                 pass
 
-            # Wait for search results to load fully
+            # Wait for search results to load (Wordery uses JS to populate hrefs)
             await page.wait_for_timeout(2000)
 
             return await self._extract_first_result(page)
@@ -52,7 +52,7 @@ class WorderyScraper(BaseScraper):
 
         page = await self._new_page()
         try:
-            await page.goto(search_url, wait_until="networkidle")
+            await page.goto(search_url, wait_until="domcontentloaded")
 
             # Handle cookie consent
             try:
@@ -63,6 +63,7 @@ class WorderyScraper(BaseScraper):
             except Exception:
                 pass
 
+            # Wait for search results (Wordery uses JS to populate hrefs)
             await page.wait_for_timeout(2000)
 
             # Extract all product links with ISBNs

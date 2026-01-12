@@ -121,34 +121,32 @@ async def run_scrapers(
 
                 if canonical_isbn:
                     # Phase 2: For each store, find the URL with matching ISBN and fetch details
-                    processed: list[BookResult | None] = []
-
-                    for i, (store, scraper) in enumerate(zip(stores, scrapers)):
-                        search_items = store_search_results[i]
-
+                    # Build tasks for parallel execution
+                    async def fetch_details(scraper, search_items, isbn):
+                        """Fetch product details for a single store."""
                         # Find the URL with matching ISBN
                         matching_url = None
                         for item in search_items:
-                            if item.isbn == canonical_isbn:
+                            if item.isbn == isbn:
                                 matching_url = item.url
                                 break
 
-                        if matching_url:
-                            # Fetch product details from the matching URL
-                            try:
-                                result = await scraper.get_product_details(matching_url)
-                                processed.append(result)
-                            except Exception:
-                                processed.append(None)
-                        else:
-                            # No matching ISBN in search results, search by ISBN directly
-                            try:
-                                result = await scraper.search_isbn(canonical_isbn)
-                                processed.append(result)
-                            except Exception:
-                                processed.append(None)
+                        try:
+                            if matching_url:
+                                return await scraper.get_product_details(matching_url)
+                            else:
+                                return await scraper.search_isbn(isbn)
+                        except Exception:
+                            return None
 
-                    return processed
+                    # Run all product detail fetches in parallel
+                    detail_tasks = [
+                        fetch_details(scraper, store_search_results[i], canonical_isbn)
+                        for i, scraper in enumerate(scrapers)
+                    ]
+                    processed = await asyncio.gather(*detail_tasks)
+
+                    return list(processed)
 
             # Fallback: old approach (no two-phase, or no canonical ISBN found)
             tasks = [scraper.search(query) for scraper in scrapers]

@@ -99,39 +99,42 @@ class BlackwellsScraper(BaseScraper):
         title_el = await page.query_selector("h1")
         title = await title_el.inner_text() if title_el else "Unknown"
 
-        # Extract price - look for lines containing "RRP" which have the pattern "RRP XX,XX€ YY,YY€"
-        # where YY,YY€ is the actual sale price
+        # Extract price - use CSS selectors for the current/sale price
         price = "N/A"
 
-        all_text = await page.inner_text("body")
-        lines = all_text.split("\n")
+        # Try to find the main product price using specific CSS classes
+        price_selectors = [
+            ".product__price",           # Main product price
+            ".product-price--current",   # Current/sale price
+            ".product-price",            # Generic price container
+        ]
 
-        for line in lines:
-            line = line.strip()
-            # Look for the RRP line pattern: "RRP 20,72€ 20,54€" or "i RRP 20,72€ 20,54€"
-            if "RRP" in line:
-                # Find all prices in this line
-                prices = re.findall(r"\d+[.,]\d{2}€", line)
-                if len(prices) >= 2:
-                    # The second price is the sale price
-                    price = prices[1]
-                    break
-                elif len(prices) == 1:
-                    # Only one price, it's the actual price
-                    price = prices[0]
+        for selector in price_selectors:
+            price_el = await page.query_selector(selector)
+            if price_el:
+                price_text = await price_el.inner_text()
+                # Extract price pattern from the text
+                price_match = re.search(r"(\d+[.,]\d{2}€)", price_text)
+                if price_match:
+                    price = price_match.group(1)
                     break
 
-        # Fallback: look for a price after "Save" line
+        # Fallback: look for price near the title/add to basket area
         if price == "N/A":
+            all_text = await page.inner_text("body")
+            lines = all_text.split("\n")
+
             for i, line in enumerate(lines):
-                if "Save" in line and "€" in line:
-                    # Next lines might have the price
-                    for j in range(i + 1, min(i + 5, len(lines))):
-                        next_line = lines[j].strip()
-                        price_match = re.match(r"^(\d+[.,]\d{2}€)$", next_line)
-                        if price_match:
-                            price = price_match.group(1)
-                            break
+                # Look for "Add to basket" and get the price above it
+                if "Add to basket" in line:
+                    # Check previous lines for a price
+                    for j in range(1, 5):
+                        if i - j >= 0:
+                            prev_line = lines[i - j].strip()
+                            price_match = re.match(r"^(\d+[.,]\d{2}€)$", prev_line)
+                            if price_match:
+                                price = price_match.group(1)
+                                break
                     if price != "N/A":
                         break
 

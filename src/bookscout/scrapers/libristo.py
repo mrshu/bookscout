@@ -95,15 +95,21 @@ class LibristoScraper(BaseScraper):
             price = prices[0].strip()
 
         # Try to extract ISBN from the page
+        # Libristo uses "EAN" label instead of "ISBN"
         isbn = None
-        isbn_match = re.search(r"ISBN[:\s]*(\d{10,13})", all_text, re.IGNORECASE)
+        isbn_match = re.search(r"(?:ISBN|EAN)[:\s]*(\d{10,13})", all_text, re.IGNORECASE)
         if isbn_match:
             isbn = isbn_match.group(1)
         else:
-            # Try to find ISBN in URL
-            url_isbn = re.search(r"(\d{13}|\d{10})", href)
-            if url_isbn:
-                isbn = url_isbn.group(1)
+            # Try to find standalone 13-digit ISBN
+            isbn_13 = re.search(r"\b(\d{13})\b", all_text)
+            if isbn_13:
+                isbn = isbn_13.group(1)
+            else:
+                # Try to find ISBN in URL
+                url_isbn = re.search(r"(\d{13}|\d{10})", href)
+                if url_isbn:
+                    isbn = url_isbn.group(1)
 
         return BookResult(
             store=self.name,

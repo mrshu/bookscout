@@ -39,47 +39,39 @@ class KennysScraper(BaseScraper):
 
     async def _extract_first_result(self, page, query: str) -> BookResult | None:
         """Extract the first search result that matches the query."""
-        # Find all product links using page.evaluate (search results may be in shadow DOM)
-        # Kennys product URLs can be:
-        #   /shop/book-title-author-isbn (with ISBN)
-        #   /shop/Book-Title-Author (without ISBN, capitalized)
-        #   /art-architecture/book-title-isbn
-        #   /computing/book-title-isbn
+        # Find product links from search results
+        # Kennys search results have links inside elements with class 'result-title'
         product_hrefs = await page.evaluate("""() => {
-            const anchors = document.querySelectorAll('a[href]');
             const hrefs = [];
             const seen = new Set();
 
-            // Skip these category patterns
-            const skipPatterns = [
-                'kennys-books-of-the-year',
-                'gift-ideas',
-                'irish-women-writers',
-                'upcoming-',
-                '?keyword=',
-                '/results,',
-            ];
-
-            for (const a of anchors) {
+            // First, try to find links in search result titles (most reliable)
+            const resultLinks = document.querySelectorAll('.result-title a[href], .search-result a[href]');
+            for (const a of resultLinks) {
                 const href = a.href;
-                if (!href || seen.has(href) || !href.includes('kennys.ie')) continue;
-
-                // Must have a path like /shop/something or /category/something
-                const pathMatch = href.match(/kennys\\.ie\\/([^\\/]+)\\/([^\\/\\?#]+)/);
-                if (!pathMatch) continue;
-
-                const category = pathMatch[1];
-                const slug = pathMatch[2];
-
-                // Skip navigation/category pages
-                if (skipPatterns.some(p => href.includes(p))) continue;
-                if (slug.length < 10) continue;  // Too short to be a book title
-
-                // Accept if it looks like a product page
-                hrefs.push(href);
-                seen.add(href);
-                if (hrefs.length >= 15) break;
+                if (href && !seen.has(href) && href.includes('kennys.ie')) {
+                    hrefs.push(href);
+                    seen.add(href);
+                }
             }
+
+            // If no result links found, fall back to general product link detection
+            if (hrefs.length === 0) {
+                const allAnchors = document.querySelectorAll('a[href]');
+                for (const a of allAnchors) {
+                    const href = a.href;
+                    if (!href || seen.has(href) || !href.includes('kennys.ie')) continue;
+
+                    // Product URLs typically have ISBN pattern at the end
+                    // e.g., /shop/book-title-author-9780008560133
+                    if (href.match(/kennys\\.ie\\/[^\\/]+\\/[^\\/?#]+-\\d{10,13}(-\\d)?$/)) {
+                        hrefs.push(href);
+                        seen.add(href);
+                    }
+                    if (hrefs.length >= 15) break;
+                }
+            }
+
             return hrefs;
         }""")
 

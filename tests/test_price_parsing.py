@@ -1,6 +1,7 @@
-"""Tests for price parsing functionality."""
+"""Tests for price parsing and ISBN extraction functionality."""
 
 import pytest
+import re
 
 from bookscout.models import parse_price, ParsedPrice
 
@@ -141,3 +142,62 @@ class TestParsedPrice:
         """Should convert None values to dictionary."""
         price = ParsedPrice(amount=None, currency=None)
         assert price.to_dict() == {"amount": None, "currency": None}
+
+
+class TestIsbnExtractionPatterns:
+    """Tests for ISBN extraction regex patterns used in scrapers."""
+
+    def test_isbn_label_pattern(self):
+        """Should match ISBN: followed by digits."""
+        pattern = r"(?:ISBN|EAN)[:\s]*(\d{10,13})"
+
+        # Standard ISBN label
+        assert re.search(pattern, "ISBN: 9780008560133", re.IGNORECASE).group(1) == "9780008560133"
+        assert re.search(pattern, "ISBN:9780008560133", re.IGNORECASE).group(1) == "9780008560133"
+        assert re.search(pattern, "ISBN 9780008560133", re.IGNORECASE).group(1) == "9780008560133"
+
+        # EAN label (used by Libristo)
+        assert re.search(pattern, "EAN: 9780008560133", re.IGNORECASE).group(1) == "9780008560133"
+        assert re.search(pattern, "EAN 9780008560133", re.IGNORECASE).group(1) == "9780008560133"
+        assert re.search(pattern, "ean:9780008560133", re.IGNORECASE).group(1) == "9780008560133"
+
+    def test_isbn_10_digit(self):
+        """Should match 10-digit ISBNs."""
+        pattern = r"(?:ISBN|EAN)[:\s]*(\d{10,13})"
+        assert re.search(pattern, "ISBN: 0008560137", re.IGNORECASE).group(1) == "0008560137"
+
+    def test_standalone_13_digit(self):
+        """Should match standalone 13-digit numbers as ISBN."""
+        pattern = r"\b(\d{13})\b"
+        text = "Product code 9780008560133 in stock"
+        assert re.search(pattern, text).group(1) == "9780008560133"
+
+    def test_kennys_url_isbn_pattern(self):
+        """Should extract ISBN from Kennys product URLs."""
+        pattern = r"-(\d{10,13})(-\d)?$"
+
+        # Standard format
+        url = "https://www.kennys.ie/shop/book-title-author-9780008560133"
+        match = re.search(pattern, url)
+        assert match.group(1) == "9780008560133"
+
+        # With suffix (e.g., -1 for different editions)
+        url2 = "https://www.kennys.ie/shop/book-title-author-9780008560133-1"
+        match2 = re.search(pattern, url2)
+        assert match2.group(1) == "9780008560133"
+
+    def test_wordery_url_isbn_pattern(self):
+        """Should extract ISBN from Wordery product URLs."""
+        # Wordery URL ends with ISBN
+        url = "https://www.wordery.com/book/a-brief-history-of-intelligence/max-s-bennett/9780008560133"
+        parts = url.rstrip("/").split("/")
+        isbn = parts[-1]
+        assert isbn == "9780008560133"
+        assert len(isbn) == 13 and isbn.isdigit()
+
+    def test_blackwells_url_isbn_pattern(self):
+        """Should extract ISBN from Blackwells product URLs."""
+        url = "https://blackwells.co.uk/bookshop/product/A-Brief-History-of-Intelligence-by-Max-S-Bennett/9780008560133"
+        parts = url.rstrip("/").split("/")
+        isbn = parts[-1]
+        assert isbn == "9780008560133"

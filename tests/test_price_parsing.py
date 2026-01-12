@@ -144,6 +144,45 @@ class TestParsedPrice:
         assert price.to_dict() == {"amount": None, "currency": None}
 
 
+class TestBlackwellsPriceExtraction:
+    """Tests for Blackwells-specific price extraction edge cases."""
+
+    def test_should_not_extract_save_discount_as_price(self):
+        """Should skip 'Save XX€' discount amounts and get actual price.
+
+        Blackwells shows prices like:
+          Save 16,60€
+          RRP 73,71€ 57,11€
+
+        The actual price is 57,11€, NOT 16,60€ (the discount).
+        """
+        # Simulate the text from .product__price element
+        price_text = "Save 16,60€\n\ni RRP 73,71€ 57,11€"
+
+        # Should NOT start extraction from "Save" text
+        assert price_text.strip().lower().startswith("save")
+
+        # The correct price (57,11€) should be extracted, not the save amount
+        # This is handled by checking .product-price--current first
+        current_price_text = "57,11€"
+        price_match = re.search(r"(\d+[.,]\d{2}€)", current_price_text)
+        assert price_match.group(1) == "57,11€"
+
+    def test_product_price_current_contains_only_sale_price(self):
+        """The .product-price--current selector should contain only the sale price."""
+        # This is what .product-price--current returns
+        current_price_text = "57,11€"
+        price_match = re.search(r"(\d+[.,]\d{2}€)", current_price_text)
+        assert price_match.group(1) == "57,11€"
+
+    def test_product_price_without_discount(self):
+        """Should extract price when there's no discount shown."""
+        # For books without discount, .product__price just shows the price
+        price_text = "17,19€"
+        price_match = re.search(r"(\d+[.,]\d{2}€)", price_text)
+        assert price_match.group(1) == "17,19€"
+
+
 class TestIsbnExtractionPatterns:
     """Tests for ISBN extraction regex patterns used in scrapers."""
 

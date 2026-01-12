@@ -103,9 +103,10 @@ class BlackwellsScraper(BaseScraper):
         price = "N/A"
 
         # Try to find the main product price using specific CSS classes
+        # Order matters: most specific first to avoid grabbing "Save XX€" discount amounts
         price_selectors = [
-            ".product__price",           # Main product price
-            ".product-price--current",   # Current/sale price
+            ".product-price--current",   # Current/sale price (most specific)
+            ".product__price",           # Main product price container
             ".product-price",            # Generic price container
         ]
 
@@ -113,6 +114,11 @@ class BlackwellsScraper(BaseScraper):
             price_el = await page.query_selector(selector)
             if price_el:
                 price_text = await price_el.inner_text()
+
+                # Skip if this is a "Save" discount amount
+                if price_text.strip().lower().startswith("save"):
+                    continue
+
                 # Extract price pattern from the text
                 price_match = re.search(r"(\d+[.,]\d{2}€)", price_text)
                 if price_match:

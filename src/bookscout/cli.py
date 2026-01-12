@@ -11,7 +11,7 @@ from playwright.async_api import async_playwright
 from rich.console import Console
 from rich.table import Table
 
-from bookscout.models import BookResult
+from bookscout.models import BookResult, parse_price
 from bookscout.scrapers import BlackwellsScraper, KennysScraper, LibristoScraper, WorderyScraper
 
 app = typer.Typer(
@@ -153,14 +153,16 @@ def display_table(results: list[BookResult | None], stores: list[Store]) -> None
 
 
 def display_json(results: list[BookResult | None], stores: list[Store]) -> None:
-    """Display results as JSON."""
+    """Display results as JSON with normalized price/currency."""
     output = []
     for store, result in zip(stores, results):
         if result:
+            parsed = parse_price(result.price)
             output.append({
                 "store": result.store,
                 "title": result.title,
-                "price": result.price,
+                "price": parsed.amount,
+                "currency": parsed.currency,
                 "url": result.url,
                 "isbn": result.isbn,
             })
@@ -169,6 +171,7 @@ def display_json(results: list[BookResult | None], stores: list[Store]) -> None:
                 "store": store.value.capitalize(),
                 "title": None,
                 "price": None,
+                "currency": None,
                 "url": None,
                 "isbn": None,
             })
